@@ -74,7 +74,7 @@ class MusicPlayer:
                     mixer.music.unpause()
                     self.playing = True
                     self.update(state=f"Listening to {name}", end=time.time() + self.diff)
-        print()
+        print("\x1b")
 
     def get_length(self, music: str) -> float:
         try:
