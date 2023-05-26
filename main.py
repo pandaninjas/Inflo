@@ -40,7 +40,7 @@ class MusicPlayer:
 
     def update(self, *args, **kwargs):
         if self.presence != None:
-            self.presence.update(*args, **kwargs)
+            self.presence.update(*args, **kwargs, buttons=[{"label": "Source code for this", "url": "https://github.com/pandaninjas/Inflo"}])
 
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
@@ -81,6 +81,7 @@ class MusicPlayer:
                     self.update(
                         state=f"Listening to {name}", end=time.time() + self.diff
                     )
+                    end = time.time() + self.diff
             self.unsetraw()
             # x1b for ESC
             if self.playing:
