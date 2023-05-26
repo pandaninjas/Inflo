@@ -9,11 +9,11 @@ except ImportError:
 
 
 class MusicPlayer:
-    presence: pypresence.Presence | None
-    songs: list[str]
-    normal_tty_settings: list[Any]
-    diff: float | None
-    playing: bool
+    presence: "pypresence.Presence | None"
+    songs: "list[str]"
+    normal_tty_settings: "list[Any]"
+    diff: "float | None"
+    playing: "bool"
 
     def __init__(self, presence, songs, initial):
         self.presence = presence
@@ -40,7 +40,7 @@ class MusicPlayer:
 
     def update(self, *args, **kwargs):
         if self.presence != None:
-            self.presence.update(*args, **kwargs, buttons=[{"label": "Source code for this", "url": "https://github.com/pandaninjas/Inflo"}])
+            self.presence.update(*args, **kwargs, buttons=[{"label": "Source code for this music player", "url": "https://github.com/pandaninjas/Inflo"}])
 
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
