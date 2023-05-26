@@ -1,2 +1,2 @@
-# MusicPlayer
-My personal music player
+# Inflo
+My personal music player.
