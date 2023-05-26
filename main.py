@@ -42,19 +42,10 @@ class MusicPlayer:
         mixer.music.play()
         self.playing = True
         self.update(state=f"Listening to {name}", end=end)
-        last_print = 0
         while mixer.music.get_busy() or not self.playing:
-            if time.time() - last_print >= 0.01 and self.playing:
-                self.unsetraw()
-                # x1b for ESC   
-                print(
-                    f"\x1b[2K\r\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
-                    end=""
-                )
-                self.setraw()
-                last_print = time.time()
             c = self.getch()
             if c == "s":
+                print()
                 return
             elif c == "r":
                 self.presence = pypresence.Presence("1033827079994753064")
@@ -74,6 +65,15 @@ class MusicPlayer:
                     mixer.music.unpause()
                     self.playing = True
                     self.update(state=f"Listening to {name}", end=time.time() + self.diff)
+            self.unsetraw()
+            # x1b for ESC   
+            if self.playing:
+                print(
+                    f"\x1b[2K\r\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
+                    end="",
+                )
+            self.setraw()
+            time.sleep(0.01)
         print("\x1b")
 
     def get_length(self, music: str) -> float:
