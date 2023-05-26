@@ -1,7 +1,12 @@
 import os, time, pypresence, random, sys, subprocess, tty, termios
 from typing import Any
 from pygame import mixer
-from mutagen.mp3 import MP3
+
+try:
+    from mutagen.mp3 import MP3
+except ImportError:
+    print("warning: no mutagen. falling back to ffmpeg for mp3 length detection.")
+
 
 class MusicPlayer:
     presence: pypresence.Presence | None
@@ -27,9 +32,11 @@ class MusicPlayer:
     def setraw(self):
         tty.setraw(sys.stdin.fileno())
         os.set_blocking(sys.stdin.fileno(), False)
-    
+
     def unsetraw(self):
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self.normal_tty_settings)
+        termios.tcsetattr(
+            sys.stdin.fileno(), termios.TCSADRAIN, self.normal_tty_settings
+        )
 
     def update(self, *args, **kwargs):
         if self.presence != None:
@@ -57,16 +64,25 @@ class MusicPlayer:
                     mixer.music.pause()
                     self.playing = False
                     if self.presence is not None:
-                        self.update(state=f"Listening to {name}", details="Paused",start=time.time())
+                        self.update(
+                            state=f"Listening to {name}",
+                            details="Paused",
+                            start=time.time(),
+                        )
                     self.unsetraw()
-                    print(f"\x1b[2K\r\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause", end="")
+                    print(
+                        f"\x1b[2K\r\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
+                        end="",
+                    )
                     self.setraw()
                 else:
                     mixer.music.unpause()
                     self.playing = True
-                    self.update(state=f"Listening to {name}", end=time.time() + self.diff)
+                    self.update(
+                        state=f"Listening to {name}", end=time.time() + self.diff
+                    )
             self.unsetraw()
-            # x1b for ESC   
+            # x1b for ESC
             if self.playing:
                 print(
                     f"\x1b[2K\r\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
@@ -80,21 +96,25 @@ class MusicPlayer:
         try:
             return MP3(music).info.length
         except Exception:
-            return float(
-                subprocess.check_output(
-                    [
-                        "ffprobe",
-                        "-i",
-                        music,
-                        "-show_entries"
-                        "format=duration"
-                        "-v"
-                        "quiet"
-                        "-of"
-                        'csv="p=0"',
-                    ]
+            try:
+                return float(
+                    subprocess.check_output(
+                        [
+                            "ffprobe",
+                            "-i",
+                            music,
+                            "-show_entries"
+                            "format=duration"
+                            "-v"
+                            "quiet"
+                            "-of"
+                            'csv="p=0"',
+                        ]
+                    )
                 )
-            )
+            except Exception:
+                print("warning: ffmpeg failed. setting length to 0")
+                return 0
 
     def getch(self) -> str:
         ch = sys.stdin.read(1)
