@@ -1,6 +1,10 @@
-import os, time, pypresence, random, sys, subprocess, tty, termios, threading
+import os, time, pypresence, random, sys, subprocess, tty, termios, threading, json, argparse, atexit
 from typing import Any
+
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
+
+print()
 
 try:
     from mutagen.mp3 import MP3
@@ -14,20 +18,46 @@ class MusicPlayer:
     diff: "float | None"
     playing: "bool"
     presence_update_lock: "threading.Lock"
+    weights_file: str
 
-    def __init__(self, presence, initial):
+    def __init__(self, presence, initial, weights_file):
         self.presence = presence
         self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
+        atexit.register(self.unsetraw)
         self.presence_update_lock = threading.Lock()
+        self.weights_file = weights_file
         self.setraw()
         mixer.init()
         if initial is not None:
             self.play(initial)
         self.run()
 
+    def generate_weights(self):
+        if self.weights_file is None:
+            return [os.listdir("."), None]
+        data = json.load(open(self.weights_file))
+        files = os.listdir(".")
+        weights = {}
+        for key in data:
+            if key in files:
+                weights[key] = data[key]
+            else:
+                autocompletions = list(filter(lambda k: k.startswith(key), files))
+                if len(autocompletions) > 1:
+                    print(f"Ambiguous autocompletion: {key}")
+                elif len(autocompletions) == 0:
+                    print(f"No such key {key}")
+                weights[autocompletions[0]] = data[key]
+        
+        for file in files:
+            if file not in weights:
+                weights[file] = 1
+        return zip(*weights.items())
+
     def run(self):
         while True:
-            self.play(random.choice(os.listdir(".")))
+            keys, weights = self.generate_weights()
+            self.play(random.choices(keys, weights)[0])
 
     def setraw(self):
         tty.setraw(sys.stdin.fileno())
@@ -40,7 +70,16 @@ class MusicPlayer:
 
     def update(self, *args, **kwargs):
         if self.presence != None:
-            self.presence.update(*args, **kwargs, buttons=[{"label": "Source code", "url": "https://github.com/pandaninjas/Inflo"}])
+            self.presence.update(
+                *args,
+                **kwargs,
+                buttons=[
+                    {
+                        "label": "Source code",
+                        "url": "https://github.com/pandaninjas/Inflo",
+                    }
+                ],
+            )
 
     def reload_presence(self, name, end):
         self.presence = pypresence.Presence("1033827079994753064")
@@ -63,7 +102,9 @@ class MusicPlayer:
                 return
             elif c == "r":
                 with self.presence_update_lock:
-                    threading.Thread(target=self.reload_presence, args=(name, end)).start()                                
+                    threading.Thread(
+                        target=self.reload_presence, args=(name, end)
+                    ).start()
             elif c == "p":
                 if self.playing:
                     self.diff = end - time.time()
@@ -88,7 +129,7 @@ class MusicPlayer:
                         state=f"Listening to {name}", end=time.time() + self.diff
                     )
                     end = time.time() + self.diff
-            
+
             end = (length - mixer.music.get_pos() / 1000) + time.time()
             self.unsetraw()
             # x1b for ESC
@@ -138,6 +179,16 @@ class MusicPlayer:
             return ch
 
 
+parser = argparse.ArgumentParser(
+    prog="Inflo",
+    description="A lightweight music player",
+)
+
+parser.add_argument("first_song", nargs="?")
+parser.add_argument("--weights", required=False)
+
+args = parser.parse_args()
+
 try:
     pres = pypresence.Presence("1033827079994753064")
     pres.connect()
@@ -145,4 +196,8 @@ except Exception as e:
     print("No pres: " + str(e))
     pres = None
 
-player = MusicPlayer(pres, sys.argv[1] if len(sys.argv) > 1 else None)
+player = MusicPlayer(
+    pres,
+    args.first_song,
+    weights_file=args.weights,
+)
