@@ -82,6 +82,7 @@ class MusicPlayer:
             )
 
     def reload_presence(self, name, end):
+        self.presence.close()
         self.presence = pypresence.Presence("1033827079994753064")
         self.presence.connect()
         self.presence.update(state=f"Listening to {name}", end=end)
@@ -156,7 +157,7 @@ class MusicPlayer:
                             "ffprobe",
                             "-i",
                             music,
-                            "-show_entries"
+                            "-show_entries",
                             "format=duration"
                             "-v"
                             "quiet"
