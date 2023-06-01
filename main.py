@@ -34,9 +34,9 @@ class MusicPlayer:
 
     def generate_weights(self):
         if self.weights_file is None:
-            return [os.listdir("."), None]
+            return [list(filter(lambda k: k.endswith("mp3"), os.listdir("."))), None]
         data = json.load(open(self.weights_file))
-        files = os.listdir(".")
+        files = list(filter(lambda k: k.endswith("mp3"), os.listdir(".")))
         weights = {}
         for key in data:
             if key in files:
@@ -70,19 +70,25 @@ class MusicPlayer:
 
     def update(self, *args, **kwargs):
         if self.presence != None:
-            self.presence.update(
-                *args,
-                **kwargs,
-                buttons=[
-                    {
-                        "label": "Source code",
-                        "url": "https://github.com/pandaninjas/Inflo",
-                    }
-                ],
-            )
+            try:
+                self.presence.update(
+                    *args,
+                    **kwargs,
+                    buttons=[
+                        {
+                            "label": "Source code",
+                            "url": "https://github.com/pandaninjas/Inflo",
+                        }
+                    ],
+                )
+            except Exception:
+                self.presence = None
 
     def reload_presence(self, name, end):
-        self.presence.close()
+        try:
+            self.presence.close()
+        except Exception:
+            pass
         self.presence = pypresence.Presence("1033827079994753064")
         self.presence.connect()
         self.presence.update(state=f"Listening to {name}", end=end)
@@ -158,10 +164,10 @@ class MusicPlayer:
                             "-i",
                             music,
                             "-show_entries",
-                            "format=duration"
-                            "-v"
-                            "quiet"
-                            "-of"
+                            "format=duration",
+                            "-v",
+                            "quiet",
+                            "-of",
                             'csv="p=0"',
                         ]
                     )
