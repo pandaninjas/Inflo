@@ -82,6 +82,10 @@ class MusicPlayer:
                     ],
                 )
             except Exception:
+                try:
+                    self.presence.close()
+                except Exception:
+                    pass
                 self.presence = None
 
     def reload_presence(self, name, end):
@@ -102,7 +106,8 @@ class MusicPlayer:
         self.playing = True
         self.update(state=f"Listening to {name}", end=end)
         last_time_update = time.time()
-        while mixer.music.get_busy() or not self.playing:
+        count = 0
+        while time.time() < end or not self.playing:
             c = self.getch()
             if c == "s":
                 print()
@@ -136,8 +141,8 @@ class MusicPlayer:
                         state=f"Listening to {name}", end=time.time() + self.diff
                     )
                     end = time.time() + self.diff
-
-            end = (length - mixer.music.get_pos() / 1000) + time.time()
+            if count % 100 == 0:
+                end = (length - mixer.music.get_pos() / 1000) + time.time()
             self.unsetraw()
             # x1b for ESC
             if self.playing:
@@ -149,6 +154,7 @@ class MusicPlayer:
                     end="",
                 )
             self.setraw()
+            count += 1
             time.sleep(0.01)
         print("\x1b")
 
