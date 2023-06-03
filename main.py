@@ -105,9 +105,8 @@ class MusicPlayer:
         mixer.music.play()
         self.playing = True
         self.update(state=f"Listening to {name}", end=end)
-        last_time_update = time.time()
         count = 0
-        while time.time() < end or not self.playing:
+        while mixer.music.get_busy() or not self.playing:
             c = self.getch()
             if c == "s":
                 print()
@@ -143,17 +142,16 @@ class MusicPlayer:
                     end = time.time() + self.diff
             if count % 100 == 0:
                 end = (length - mixer.music.get_pos() / 1000) + time.time()
-            self.unsetraw()
             # x1b for ESC
             if self.playing:
-                if last_time_update + 10 <= time.time():
-                    last_time_update = time.time()
+                self.unsetraw()
+                if count % 1000 == 0:
                     self.update(state=f"Listening to {name}", end=end)
                 print(
                     f"\x1b[2K\r\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
                     end="",
                 )
-            self.setraw()
+                self.setraw()
             count += 1
             time.sleep(0.01)
         print("\x1b")
@@ -182,16 +180,12 @@ class MusicPlayer:
                 print("warning: ffmpeg failed. setting length to 0")
                 return 0
 
-    def getch(self) -> str:
-        ch = sys.stdin.read(1)
-        if ch == "\x03":
+    def getch(self):
+        c = sys.stdin.read(1)
+        if c == "\x03":
             raise KeyboardInterrupt()
-        elif ch == "\x04":
-            raise EOFError()
-        else:
-            return ch
-
-
+        return c
+    
 parser = argparse.ArgumentParser(
     prog="Inflo",
     description="A lightweight music player",
