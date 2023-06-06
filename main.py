@@ -193,15 +193,17 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument("first_song", nargs="?")
 parser.add_argument("--weights", required=False)
-
+parser.add_argument("--disable-discord", action="store_true")
 args = parser.parse_args()
 
-try:
-    pres = pypresence.Presence("1033827079994753064")
-    pres.connect()
-except Exception as e:
-    print("No pres: " + str(e))
-    pres = None
+pres = None
+if not args.disable_discord:
+    try:
+        pres = pypresence.Presence("1033827079994753064")
+        pres.connect()
+    except Exception as e:
+        print("No pres: " + str(e))
+        pres = None
 
 player = MusicPlayer(
     pres,
