@@ -1,4 +1,4 @@
-import os, time, pypresence, random, sys, subprocess, tty, termios, threading, json, argparse, atexit
+import os, time, pypresence, random, sys, subprocess, tty, termios, threading, json, argparse, atexit, re
 from typing import Any
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
@@ -11,6 +11,7 @@ try:
 except ImportError:
     print("warning: no mutagen. falling back to ffmpeg for mp3 length detection.")
 
+YOUTUBE_DL_ID_REGEX = re.compile(r"\[[a-zA-Z0-9\-_]{11}]")
 
 class MusicPlayer:
     presence: "pypresence.Presence | None"
@@ -18,7 +19,8 @@ class MusicPlayer:
     diff: "float | None"
     playing: "bool"
     presence_update_lock: "threading.Lock"
-    weights_file: str
+    weights_file: "str"
+    length: "int"
 
     def __init__(self, presence, initial, weights_file):
         self.presence = presence
@@ -48,7 +50,7 @@ class MusicPlayer:
                 elif len(autocompletions) == 0:
                     print(f"No such key {key}")
                 weights[autocompletions[0]] = data[key]
-        
+
         for file in files:
             if file not in weights:
                 weights[file] = 1
@@ -69,17 +71,33 @@ class MusicPlayer:
         )
 
     def update(self, *args, **kwargs):
+        buttons = [
+            {
+                "label": "Source code",
+                "url": "https://github.com/pandaninjas/Inflo",
+            }
+        ]
+        match = YOUTUBE_DL_ID_REGEX.search(kwargs["state"])
+        large_image_url = None
+        if match:
+            data = match.group(0).strip('[]')
+            large_image_url = f"https://img.youtube.com/vi/{data}/maxresdefault.jpg"
+            if "end" in kwargs:
+                buttons.append(
+                    {"label": "Join", "url": f"https://youtube.com/watch?v={data}&t={round(self.length - (kwargs['end'] - time.time()))}"}
+                )
+            else:
+                buttons.append(
+                    {"label": "Join", "url": f"https://youtube.com/watch?v={data}"}
+                )
+
         if self.presence != None:
             try:
                 self.presence.update(
                     *args,
                     **kwargs,
-                    buttons=[
-                        {
-                            "label": "Source code",
-                            "url": "https://github.com/pandaninjas/Inflo",
-                        }
-                    ],
+                    large_image=large_image_url,
+                    buttons=buttons,
                 )
             except Exception:
                 try:
@@ -95,12 +113,12 @@ class MusicPlayer:
             pass
         self.presence = pypresence.Presence("1033827079994753064")
         self.presence.connect()
-        self.presence.update(state=f"Listening to {name}", end=end)
+        self.update(state=f"Listening to {name}", end=end)
 
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
-        length = self.get_length(song)
-        end = time.time() + length
+        self.length = self.get_length(song)
+        end = time.time() + self.length
         mixer.music.load(song)
         mixer.music.play()
         self.playing = True
@@ -141,11 +159,11 @@ class MusicPlayer:
                     )
                     end = time.time() + self.diff
             if count % 100 == 0:
-                end = (length - mixer.music.get_pos() / 1000) + time.time()
+                end = (self.length - mixer.music.get_pos() / 1000) + time.time()
             # x1b for ESC
             if self.playing:
                 self.unsetraw()
-                if count % 1000 == 0:
+                if count % 100 == 0:
                     self.update(state=f"Listening to {name}", end=end)
                 print(
                     f"\x1b[2K\r\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
@@ -185,7 +203,8 @@ class MusicPlayer:
         if c == "\x03":
             raise KeyboardInterrupt()
         return c
-    
+
+
 parser = argparse.ArgumentParser(
     prog="Inflo",
     description="A lightweight music player",
