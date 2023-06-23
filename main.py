@@ -4,7 +4,7 @@ from typing import Any
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
 
-print()
+print("\n")
 
 try:
     from mutagen.mp3 import MP3
@@ -21,6 +21,7 @@ class MusicPlayer:
     presence_update_lock: "threading.Lock"
     weights_file: "str"
     length: "int"
+    volume: "float"
 
     def __init__(self, presence, initial, weights_file):
         self.presence = presence
@@ -28,6 +29,7 @@ class MusicPlayer:
         atexit.register(self.unsetraw)
         self.presence_update_lock = threading.Lock()
         self.weights_file = weights_file
+        self.volume = 1.0
         self.setraw()
         mixer.init()
         if initial is not None:
@@ -145,7 +147,7 @@ class MusicPlayer:
                         )
                     self.unsetraw()
                     print(
-                        f"\x1b[2K\r\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
+                        f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                         end="",
                     )
                     self.setraw()
@@ -156,6 +158,12 @@ class MusicPlayer:
                         state=f"Listening to {name}", end=time.time() + self.diff
                     )
                     end = time.time() + self.diff
+            elif c == "u":
+                self.volume += 0.01
+                mixer.music.set_volume(self.volume)
+            elif c == "d":
+                self.volume -= 0.01
+                mixer.music.set_volume(self.volume)
             if count % 100 == 0:
                 end = (self.length - mixer.music.get_pos() / 1000) + time.time()
             # x1b for ESC
@@ -164,7 +172,7 @@ class MusicPlayer:
                 if count % 100 == 0:
                     self.update(state=f"Listening to {name}", end=end)
                 print(
-                    f"\x1b[2K\r\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause",
+                    f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                     end="",
                 )
                 self.setraw()
