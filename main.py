@@ -45,12 +45,10 @@ class MusicPlayer:
                 weights[key] = data[key]
             else:
                 autocompletions = list(filter(lambda k: k.startswith(key), files))
-                if len(autocompletions) > 1:
-                    print(f"Ambiguous autocompletion: {key}")
-                elif len(autocompletions) == 0:
+                if len(autocompletions) == 0:
                     print(f"No such key {key}")
-                weights[autocompletions[0]] = data[key]
-
+                for completion in autocompletions:
+                    weights[completion] = data[key]
         for file in files:
             if file not in weights:
                 weights[file] = 1
