@@ -1,4 +1,15 @@
-import os, time, pypresence, random, sys, subprocess, tty, termios, threading, json, argparse, atexit, re
+import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re
+try:
+    import tty, termios
+    UNIX_TTY = True
+except Exception:
+    UNIX_TTY = False
+    try:
+        import msvcrt
+        MSVCRT = True
+    except ImportError:
+        MSVCRT = False
+
 from typing import Any
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
@@ -25,8 +36,9 @@ class MusicPlayer:
 
     def __init__(self, presence, initial, weights_file):
         self.presence = presence
-        self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
-        atexit.register(self.unsetraw)
+        if UNIX_TTY:
+            self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
+            atexit.register(self.unsetraw)
         self.presence_update_lock = threading.Lock()
         self.weights_file = weights_file
         self.volume = 1.0
@@ -62,13 +74,15 @@ class MusicPlayer:
             self.play(random.choices(keys, weights)[0])
 
     def setraw(self):
-        tty.setraw(sys.stdin.fileno())
-        os.set_blocking(sys.stdin.fileno(), False)
+        if UNIX_TTY:
+            tty.setraw(sys.stdin.fileno())
+            os.set_blocking(sys.stdin.fileno(), False)
 
     def unsetraw(self):
-        termios.tcsetattr(
-            sys.stdin.fileno(), termios.TCSADRAIN, self.normal_tty_settings
-        )
+        if UNIX_TTY:
+            termios.tcsetattr(
+                sys.stdin.fileno(), termios.TCSADRAIN, self.normal_tty_settings
+            )
 
     def update(self, *args, **kwargs):
         buttons = [
@@ -149,6 +163,7 @@ class MusicPlayer:
                     print(
                         f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                         end="",
+                        flush=True
                     )
                     self.setraw()
                 else:
@@ -174,6 +189,7 @@ class MusicPlayer:
                 print(
                     f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                     end="",
+                    flush=True
                 )
                 self.setraw()
             count += 1
@@ -205,10 +221,19 @@ class MusicPlayer:
                 return 0
 
     def getch(self):
-        c = sys.stdin.read(1)
-        if c == "\x03":
-            raise KeyboardInterrupt()
-        return c
+        if UNIX_TTY or MSVCRT:
+            if UNIX_TTY:
+                c = sys.stdin.read(1)
+            else:
+                if msvcrt.kbhit():
+                    c = msvcrt.getwch()
+                else:
+                    c = ""
+            if c == "\x03":
+                raise KeyboardInterrupt()
+            return c
+        else:
+            return ''
 
 
 parser = argparse.ArgumentParser(
