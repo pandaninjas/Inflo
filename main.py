@@ -51,7 +51,7 @@ class MusicPlayer:
     def generate_weights(self):
         if self.weights_file is None:
             return [list(filter(lambda k: k.endswith("mp3"), os.listdir("."))), None]
-        data = json.load(open(self.weights_file))
+        data = json.load(open(self.weights_file, encoding="utf8"))
         files = list(filter(lambda k: k.endswith("mp3"), os.listdir(".")))
         weights = {}
         for key in data:
@@ -163,7 +163,6 @@ class MusicPlayer:
                     print(
                         f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                         end="",
-                        flush=True
                     )
                     self.setraw()
                 else:
@@ -189,11 +188,14 @@ class MusicPlayer:
                 print(
                     f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                     end="",
-                    flush=True
                 )
                 self.setraw()
             count += 1
             time.sleep(0.01)
+        print(
+            f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rNow playing {name}, time left: 0.00\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
+            end="",
+        )
         print("\x1b")
 
     def get_length(self, music: str) -> float:
