@@ -161,7 +161,7 @@ class MusicPlayer:
                         )
                     self.unsetraw()
                     print(
-                        f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
+                        f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                         end="",
                     )
                     self.setraw()
