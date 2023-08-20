@@ -1,11 +1,14 @@
 import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re
+
 try:
     import tty, termios
+
     UNIX_TTY = True
 except Exception:
     UNIX_TTY = False
     try:
         import msvcrt
+
         MSVCRT = True
     except ImportError:
         MSVCRT = False
@@ -23,6 +26,7 @@ except ImportError:
     print("warning: no mutagen. falling back to ffmpeg for mp3 length detection.")
 
 YOUTUBE_DL_ID_REGEX = re.compile(r"\[[a-zA-Z0-9\-_]{11}]")
+
 
 class MusicPlayer:
     presence: "pypresence.Presence | None"
@@ -94,11 +98,14 @@ class MusicPlayer:
         match = YOUTUBE_DL_ID_REGEX.search(kwargs["state"])
         large_image_url = None
         if match:
-            data = match.group(0).strip('[]')
+            data = match.group(0).strip("[]")
             large_image_url = f"https://img.youtube.com/vi/{data}/maxresdefault.jpg"
             if "end" in kwargs:
                 buttons.append(
-                    {"label": "Join", "url": f"https://youtube.com/watch?v={data}&t={round(self.length - (kwargs['end'] - time.time()))}"}
+                    {
+                        "label": "Join",
+                        "url": f"https://youtube.com/watch?v={data}&t={round(self.length - (kwargs['end'] - time.time()))}",
+                    }
                 )
             else:
                 buttons.append(
@@ -227,15 +234,12 @@ class MusicPlayer:
             if UNIX_TTY:
                 c = sys.stdin.read(1)
             else:
-                if msvcrt.kbhit():
-                    c = msvcrt.getwch()
-                else:
-                    c = ""
+                c = msvcrt.getwch() if msvcrt.kbhit() else ""
             if c == "\x03":
                 raise KeyboardInterrupt()
             return c
         else:
-            return ''
+            return ""
 
 
 parser = argparse.ArgumentParser(
