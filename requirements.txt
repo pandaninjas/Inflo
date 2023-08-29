@@ -1,3 +1,5 @@
 mutagen==1.46.0
 pygame==2.5.0
 pypresence==4.3.0
+requests
+requests-cache

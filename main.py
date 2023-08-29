@@ -1,4 +1,4 @@
-import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re
+import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache 
 
 try:
     import tty, termios
@@ -18,6 +18,7 @@ from typing import Any
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
 
+requests_cache.install_cache('inflo_cache', backend='memory', expire_after=3600)
 print("\n")
 
 try:
@@ -38,8 +39,9 @@ class MusicPlayer:
     length: "int"
     volume: "float"
 
-    def __init__(self, presence, initial, weights_file):
+    def __init__(self, presence, initial, weights_file, disable_api):
         self.presence = presence
+        self.disable_api = disable_api
         if UNIX_TTY:
             self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
             atexit.register(self.unsetraw)
@@ -97,19 +99,30 @@ class MusicPlayer:
         ]
         match = YOUTUBE_DL_ID_REGEX.search(kwargs["state"])
         large_image_url = None
+        channel_name = None
         if match:
-            data = match.group(0).strip("[]")
-            large_image_url = f"https://img.youtube.com/vi/{data}/maxresdefault.jpg"
+            video_id = match.group(0).strip("[]")
+            if self.disable_api:
+                large_image_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                channel_name = None
+            else:
+                try:
+                    api_result = requests.get("https://inflo-api.thefightagainstmalware.workers.dev/" + video_id).json()
+                    large_image_url = api_result['maxres']
+                    channel_name = api_result['channelTitle']
+                except Exception:
+                    large_image_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                    channel_name = None
             if "end" in kwargs:
                 buttons.append(
                     {
                         "label": "Join",
-                        "url": f"https://youtube.com/watch?v={data}&t={round(self.length - (kwargs['end'] - time.time()))}",
+                        "url": f"https://youtube.com/watch?v={video_id}&t={round(self.length - (kwargs['end'] - time.time()))}",
                     }
                 )
             else:
                 buttons.append(
-                    {"label": "Join", "url": f"https://youtube.com/watch?v={data}"}
+                    {"label": "Join", "url": f"https://youtube.com/watch?v={video_id}"}
                 )
 
         if self.presence != None:
@@ -119,6 +132,7 @@ class MusicPlayer:
                     **kwargs,
                     large_image=large_image_url,
                     buttons=buttons,
+                    large_text=channel_name
                 )
             except Exception:
                 try:
@@ -134,7 +148,7 @@ class MusicPlayer:
             pass
         self.presence = pypresence.Presence("1033827079994753064")
         self.presence.connect()
-        self.update(state=f"Listening to {name}", end=end)
+        self.update(state=name, end=end)
 
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
@@ -143,7 +157,7 @@ class MusicPlayer:
         mixer.music.load(song)
         mixer.music.play()
         self.playing = True
-        self.update(state=f"Listening to {name}", end=end)
+        self.update(state=name, end=end)
         count = 0
         while mixer.music.get_busy() or not self.playing:
             c = self.getch()
@@ -162,7 +176,7 @@ class MusicPlayer:
                     self.playing = False
                     if self.presence is not None:
                         self.update(
-                            state=f"Listening to {name}",
+                            state=name,
                             details="Paused",
                             start=time.time(),
                         )
@@ -176,7 +190,7 @@ class MusicPlayer:
                     mixer.music.unpause()
                     self.playing = True
                     self.update(
-                        state=f"Listening to {name}", end=time.time() + self.diff
+                        state=name, end=time.time() + self.diff
                     )
                     end = time.time() + self.diff
             elif c == "u":
@@ -191,7 +205,7 @@ class MusicPlayer:
             if self.playing:
                 self.unsetraw()
                 if count % 100 == 0:
-                    self.update(state=f"Listening to {name}", end=end)
+                    self.update(state=name, end=end)
                 print(
                     f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                     end="",
@@ -250,6 +264,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument("first_song", nargs="?")
 parser.add_argument("--weights", required=False)
 parser.add_argument("--disable-discord", action="store_true")
+parser.add_argument("--disable-api", action="store_true")
 args = parser.parse_args()
 
 pres = None
@@ -265,4 +280,5 @@ player = MusicPlayer(
     pres,
     args.first_song,
     weights_file=args.weights,
+    disable_api=args.disable_api
 )
