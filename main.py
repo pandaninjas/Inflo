@@ -1,4 +1,4 @@
-import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache 
+import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache
 
 try:
     import tty, termios
@@ -18,7 +18,7 @@ from typing import Any
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
 
-requests_cache.install_cache('inflo_cache', backend='memory', expire_after=3600)
+requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
 print("\n")
 
 try:
@@ -38,20 +38,24 @@ class MusicPlayer:
     weights_file: "str"
     length: "int"
     volume: "float"
+    initial: "str"
 
     def __init__(self, presence, initial, weights_file, disable_api):
         self.presence = presence
         self.disable_api = disable_api
+        self.weights_file = weights_file
+        self.initial = initial
+
+    def start(self):
+        self.presence_update_lock = threading.Lock()
+        self.volume = 1.0
         if UNIX_TTY:
             self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
             atexit.register(self.unsetraw)
-        self.presence_update_lock = threading.Lock()
-        self.weights_file = weights_file
-        self.volume = 1.0
         self.setraw()
         mixer.init()
-        if initial is not None:
-            self.play(initial)
+        if self.initial is not None:
+            self.play(self.initial)
         self.run()
 
     def generate_weights(self):
@@ -103,15 +107,22 @@ class MusicPlayer:
         if match:
             video_id = match.group(0).strip("[]")
             if self.disable_api:
-                large_image_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                large_image_url = (
+                    f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                )
                 channel_name = None
             else:
                 try:
-                    api_result = requests.get("https://inflo-api.thefightagainstmalware.workers.dev/" + video_id).json()
-                    large_image_url = api_result['maxres']
-                    channel_name = api_result['channelTitle']
+                    api_result = requests.get(
+                        "https://inflo-api.thefightagainstmalware.workers.dev/"
+                        + video_id
+                    ).json()
+                    large_image_url = api_result["maxres"]
+                    channel_name = api_result["channelTitle"]
                 except Exception:
-                    large_image_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                    large_image_url = (
+                        f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                    )
                     channel_name = None
             if "end" in kwargs:
                 buttons.append(
@@ -132,7 +143,7 @@ class MusicPlayer:
                     **kwargs,
                     large_image=large_image_url,
                     buttons=buttons,
-                    large_text=channel_name
+                    large_text=channel_name,
                 )
             except Exception:
                 try:
@@ -189,9 +200,7 @@ class MusicPlayer:
                 else:
                     mixer.music.unpause()
                     self.playing = True
-                    self.update(
-                        state=name, end=time.time() + self.diff
-                    )
+                    self.update(state=name, end=time.time() + self.diff)
                     end = time.time() + self.diff
             elif c == "u":
                 self.volume += 0.01
@@ -256,29 +265,28 @@ class MusicPlayer:
             return ""
 
 
-parser = argparse.ArgumentParser(
-    prog="Inflo",
-    description="A lightweight music player",
-)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        prog="Inflo",
+        description="A lightweight music player",
+    )
 
-parser.add_argument("first_song", nargs="?")
-parser.add_argument("--weights", required=False)
-parser.add_argument("--disable-discord", action="store_true")
-parser.add_argument("--disable-api", action="store_true")
-args = parser.parse_args()
+    parser.add_argument("first_song", nargs="?")
+    parser.add_argument("--weights", required=False)
+    parser.add_argument("--disable-discord", action="store_true")
+    parser.add_argument("--disable-api", action="store_true")
+    args = parser.parse_args()
 
-pres = None
-if not args.disable_discord:
-    try:
-        pres = pypresence.Presence("1033827079994753064")
-        pres.connect()
-    except Exception as e:
-        print("No pres: " + str(e))
-        pres = None
+    pres = None
+    if not args.disable_discord:
+        try:
+            pres = pypresence.Presence("1033827079994753064")
+            pres.connect()
+        except Exception as e:
+            print("No pres: " + str(e))
+            pres = None
 
-player = MusicPlayer(
-    pres,
-    args.first_song,
-    weights_file=args.weights,
-    disable_api=args.disable_api
-)
+    player = MusicPlayer(
+        pres, args.first_song, weights_file=args.weights, disable_api=args.disable_api
+    )
+    player.start()
