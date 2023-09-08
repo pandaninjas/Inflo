@@ -1,4 +1,4 @@
-import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache
+import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata
 
 try:
     import tty, termios
@@ -27,7 +27,7 @@ except ImportError:
     print("warning: no mutagen. falling back to ffmpeg for mp3 length detection.")
 
 YOUTUBE_DL_ID_REGEX = re.compile(r"\[[a-zA-Z0-9\-_]{11}]")
-
+MOVE_AND_CLEAR_LINE = "\x1b[1A\x1b[2K"
 
 class MusicPlayer:
     presence: "pypresence.Presence | None"
@@ -39,6 +39,7 @@ class MusicPlayer:
     length: "int"
     volume: "float"
     initial: "str"
+    lines_written: "int"
 
     def __init__(self, presence, initial, weights_file, disable_api):
         self.presence = presence
@@ -49,6 +50,7 @@ class MusicPlayer:
     def start(self):
         self.presence_update_lock = threading.Lock()
         self.volume = 1.0
+        self.lines_written = 3
         if UNIX_TTY:
             self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
             atexit.register(self.unsetraw)
@@ -193,7 +195,7 @@ class MusicPlayer:
                         )
                     self.unsetraw()
                     print(
-                        f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
+                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rPaused: {name}, time left: {self.diff:.2f}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
                         end="",
                     )
                     self.setraw()
@@ -215,18 +217,26 @@ class MusicPlayer:
                 self.unsetraw()
                 if count % 100 == 0:
                     self.update(state=name, end=end)
+                to_print = f"Now playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}"
                 print(
-                    f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rNow playing {name}, time left: {(end - time.time()):.2f}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
+                    f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{to_print}\r",
                     end="",
                 )
+                self.lines_written = sum(map(lambda k: math.ceil(self.term_length(k) / os.get_terminal_size().columns), to_print.split("\n")))
                 self.setraw()
             count += 1
             time.sleep(0.01)
         print(
-            f"\x1b[2K\r\x1b[1A\x1b[2K\x1b[1A\x1b[2K\rNow playing {name}, time left: 0.00\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
+            f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rNow playing {name}, time left: 0.00\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
             end="",
         )
         print("\x1b")
+
+    def term_length(self, string: str) -> int:
+        length = 0
+        for char in string:
+            length += 2 if unicodedata.east_asian_width(char) in ["W", "F"] else 1
+        return length
 
     def get_length(self, music: str) -> float:
         try:
