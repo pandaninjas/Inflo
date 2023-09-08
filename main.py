@@ -19,7 +19,7 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
 
 requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
-print("\n")
+print("\n\x1b[?25l")
 
 try:
     from mutagen.mp3 import MP3
