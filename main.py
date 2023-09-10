@@ -20,6 +20,7 @@ from pygame import mixer
 
 requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
 print("\n\x1b[?25l")
+atexit.register(print, "\x1b[?25h", end="")
 
 try:
     from mutagen.mp3 import MP3
