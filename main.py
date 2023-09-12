@@ -13,7 +13,7 @@ except Exception:
     except ImportError:
         MSVCRT = False
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
@@ -37,18 +37,18 @@ class MusicPlayer:
     playing: "bool"
     presence_update_lock: "threading.Lock"
     weights_file: "str"
-    length: "int"
+    length: "float"
     volume: "float"
     initial: "str"
     lines_written: "int"
 
-    def __init__(self, presence, initial, weights_file, disable_api):
+    def __init__(self, presence: "pypresence.Presence | None", initial: "str", weights_file: "str", disable_api: "bool"):
         self.presence = presence
         self.disable_api = disable_api
         self.weights_file = weights_file
         self.initial = initial
 
-    def start(self):
+    def start(self) -> None:
         self.presence_update_lock = threading.Lock()
         self.volume = 1.0
         self.lines_written = 3
@@ -201,6 +201,8 @@ class MusicPlayer:
                     )
                     self.setraw()
                 else:
+                    if TYPE_CHECKING:
+                        assert self.diff is not None
                     mixer.music.unpause()
                     self.playing = True
                     self.update(state=name, end=time.time() + self.diff)
@@ -230,6 +232,9 @@ class MusicPlayer:
         print(
             f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rNow playing {name}, time left: 0.00\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
             end="",
+        )
+        print(
+            "\n" * (self.lines_written - 3), end=""
         )
         print("\x1b")
 
