@@ -118,7 +118,8 @@ class MusicPlayer:
                 try:
                     api_result = requests.get(
                         "https://inflo-api.thefightagainstmalware.workers.dev/"
-                        + video_id
+                        + video_id,
+                        timeout=1
                     ).json()
                     large_image_url = api_result["maxres"]
                     channel_name = api_result["channelTitle"]
@@ -168,11 +169,11 @@ class MusicPlayer:
         name = song.replace(".mp3", "").strip()
         self.length = self.get_length(song)
         end = time.time() + self.length
-        mixer.music.load(song)
-        mixer.music.play()
         self.playing = True
         self.update(state=name, end=end)
         count = 0
+        mixer.music.load(song)
+        mixer.music.play()
         while mixer.music.get_busy() or not self.playing:
             c = self.getch()
             if c == "s":
