@@ -29,6 +29,7 @@ except ImportError:
 
 YOUTUBE_DL_ID_REGEX = re.compile(r"\[[a-zA-Z0-9\-_]{11}]")
 MOVE_AND_CLEAR_LINE = "\x1b[1A\x1b[2K"
+ANSI_REGEX = re.compile("\x1b\\[\\d+?m")
 
 class MusicPlayer:
     presence: "pypresence.Presence | None"
@@ -172,11 +173,10 @@ class MusicPlayer:
         cur_time = time.time()
         bar_width = os.get_terminal_size().columns - 14
         left_bar_width = int((cur_time - start) / (end - start) * bar_width)
-        print(left_bar_width)
         right_bar_width = bar_width - left_bar_width
         mins_start, secs_start = divmod(cur_time - start, 60)
         mins_end, secs_end = divmod(end - cur_time, 60)
-        return f"{int(mins_start)}:{int(secs_start):02d} \033[32m{left_bar_width * '━'}\033[0m{right_bar_width * '━'} -{int(mins_end)}:{int(secs_end):02d}"
+        return f"{int(mins_start)}:{int(secs_start):02d} \x1b[32m{left_bar_width * '━'}\x1b[0m{right_bar_width * '━'} -{int(mins_end)}:{int(secs_end):02d}"
 
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
@@ -239,12 +239,12 @@ class MusicPlayer:
                 self.unsetraw()
                 if count % 100 == 0:
                     self.update(state=name, start=start, end=end)
-                to_print = f"Now playing {name}\n{self.render_progress_bar(start, end)}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}"
+                to_print = f"Now playing {name}\n{self.render_progress_bar(start, end)}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
                 print(
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{to_print}\r",
                     end="",
                 )
-                self.lines_written = sum(map(lambda k: math.ceil(self.term_length(k) / os.get_terminal_size().columns), to_print.split("\n")))
+                self.lines_written = sum(map(lambda k: self.ceil(self.term_length(k) / os.get_terminal_size().columns), to_print.split("\n")))
                 self.setraw()
             count += 1
             time.sleep(0.01)
@@ -253,6 +253,7 @@ class MusicPlayer:
         )
 
     def term_length(self, string: str) -> int:
+        string = ANSI_REGEX.sub("", string)
         length = 0
         for char in string:
             length += 2 if unicodedata.east_asian_width(char) in ["W", "F"] else 1
@@ -293,7 +294,9 @@ class MusicPlayer:
             return c
         else:
             return ""
-
+    
+    def ceil(self, val):
+        return int(math.ceil(val) if val % 1 != 0 else val + 1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
