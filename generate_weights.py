@@ -1,5 +1,5 @@
 import argparse
-from main import MusicPlayer
+from main import IOUtilities
 
 parser = argparse.ArgumentParser(
     prog="Inflo Weights Generator",
@@ -9,8 +9,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--weights", required=False)
 args = parser.parse_args()
 
-player = MusicPlayer(None, None, args.weights, True)
-keys, weights = player.generate_weights()
+keys, weights = IOUtilities.generate_weights(args.weights)
 total = sum(weights)
 combined = []
 for item in range(len(keys)):

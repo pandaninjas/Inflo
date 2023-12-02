@@ -1,4 +1,4 @@
-import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata, datetime
+import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata
 
 try:
     import tty, termios
@@ -19,6 +19,7 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
 
 requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
+
 print("\n\x1b[?25l")
 atexit.register(print, "\x1b[?25h", end="")
 
@@ -31,9 +32,72 @@ YOUTUBE_DL_ID_REGEX = re.compile(r"\[[a-zA-Z0-9\-_]{11}]")
 MOVE_AND_CLEAR_LINE = "\x1b[1A\x1b[2K"
 ANSI_REGEX = re.compile("\x1b\\[\\d+?m")
 
+class IOUtilities:
+    @staticmethod
+    def generate_weights(weights_file: str):
+        if weights_file is None:
+            return [list(filter(lambda k: k.endswith("mp3"), os.listdir("."))), None]
+        data: "dict[str, str]" = json.load(open(weights_file, encoding="utf8"))
+        # sort data by key length, shortest first. this allows longer completions to override shorter ones
+        data = {k: v for k, v in sorted(data.items(), key=lambda item: len(item[0]))}
+
+        files = list(filter(lambda k: k.endswith("mp3"), os.listdir(".")))
+        weights = {}
+        for key in data:
+            if key in files:
+                weights[key] = data[key]
+            else:
+                autocompletions = list(filter(lambda k: k.startswith(key), files))
+                if len(autocompletions) == 0:
+                    print(f"No such key {key}")
+                for completion in autocompletions:
+                    weights[completion] = data[key]
+        for file in files:
+            if file not in weights:
+                weights[file] = 1
+        return zip(*weights.items())
+    
+    @staticmethod
+    def setraw():
+        if UNIX_TTY:
+            tty.setraw(sys.stdin.fileno())
+            os.set_blocking(sys.stdin.fileno(), False)
+
+    @staticmethod
+    def unsetraw(normal_tty_settings):
+        if UNIX_TTY:
+            termios.tcsetattr(
+                sys.stdin.fileno(), termios.TCSADRAIN, normal_tty_settings
+            )
+    
+    @staticmethod
+    def term_length(string: str) -> int:
+        string = ANSI_REGEX.sub("", string)
+        length = 0
+        for char in string:
+            length += 2 if unicodedata.east_asian_width(char) in ["W", "F"] else 1
+        return length
+
+    @staticmethod
+    def process_name(name: str) -> "list[str]":
+        lines = []
+        cur = ""
+        cur_len = 0
+        idx = 0
+        while idx < len(name):
+            while cur_len < 30 and idx < len(name):
+                cur += name[idx] # TODO: use graphemes instead
+                cur_len += IOUtilities.term_length(name[idx])
+                idx += 1
+            lines.append(cur)
+            cur = ""
+            cur_len = 0
+        return lines
+
+
 class MusicPlayer:
     presence: "pypresence.Presence | None"
-    normal_tty_settings: "list[Any]"
+    normal_tty_settings: "list[Any]" = None
     diff: "tuple[float, float] | None"
     playing: "bool"
     presence_update_lock: "threading.Lock"
@@ -55,8 +119,8 @@ class MusicPlayer:
         self.lines_written = 3
         if UNIX_TTY:
             self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
-            atexit.register(self.unsetraw)
-        self.setraw()
+            atexit.register(IOUtilities.unsetraw, self.normal_tty_settings)
+        IOUtilities.setraw()
         mixer.init()
         if self.presence != None:
             atexit.register(self.presence.close)
@@ -64,101 +128,75 @@ class MusicPlayer:
             self.play(self.initial)
         self.run()
 
-    def generate_weights(self):
-        if self.weights_file is None:
-            return [list(filter(lambda k: k.endswith("mp3"), os.listdir("."))), None]
-        data = json.load(open(self.weights_file, encoding="utf8"))
-        files = list(filter(lambda k: k.endswith("mp3"), os.listdir(".")))
-        weights = {}
-        for key in data:
-            if key in files:
-                weights[key] = data[key]
-            else:
-                autocompletions = list(filter(lambda k: k.startswith(key), files))
-                if len(autocompletions) == 0:
-                    print(f"No such key {key}")
-                for completion in autocompletions:
-                    weights[completion] = data[key]
-        for file in files:
-            if file not in weights:
-                weights[file] = 1
-        return zip(*weights.items())
-
     def run(self):
         while True:
-            keys, weights = self.generate_weights()
+            keys, weights = IOUtilities.generate_weights(self.weights_file)
             self.play(random.choices(keys, weights)[0])
 
-    def setraw(self):
-        if UNIX_TTY:
-            tty.setraw(sys.stdin.fileno())
-            os.set_blocking(sys.stdin.fileno(), False)
-
-    def unsetraw(self):
-        if UNIX_TTY:
-            termios.tcsetattr(
-                sys.stdin.fileno(), termios.TCSADRAIN, self.normal_tty_settings
-            )
-
     def update(self, *args, **kwargs):
-        with self.presence_update_lock:
-            buttons = [
-                {
-                    "label": "Source code",
-                    "url": "https://github.com/pandaninjas/Inflo",
-                }
-            ]
-            match = YOUTUBE_DL_ID_REGEX.search(kwargs["state"])
-            large_image_url = None
-            channel_name = None
-            if match:
-                video_id = match.group(0).strip("[]")
-                if self.disable_api:
-                    large_image_url = (
-                        f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-                    )
-                    channel_name = None
-                else:
-                    try:
-                        api_result = requests.get(
-                            "https://inflo-api.thefightagainstmalware.workers.dev/"
-                            + video_id,
-                            timeout=1
-                        ).json()
-                        large_image_url = api_result["maxres"]
-                        channel_name = api_result["channelTitle"]
-                    except Exception:
+        if self.presence != None:
+            with self.presence_update_lock:
+                buttons = [
+                    {
+                        "label": "Source code",
+                        "url": "https://github.com/pandaninjas/Inflo",
+                    }
+                ]
+                match = YOUTUBE_DL_ID_REGEX.search(kwargs["name"])
+                name = kwargs.pop("name", "")
+                details = kwargs.pop("details", "")
+                processed_name = IOUtilities.process_name(name)
+                large_image_url = None
+                channel_name = None
+                if match:
+                    video_id = match.group(0).strip("[]")
+                    if self.disable_api:
                         large_image_url = (
                             f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                         )
                         channel_name = None
-                if "end" in kwargs:
-                    buttons.append(
-                        {
-                            "label": "Join",
-                            "url": f"https://youtube.com/watch?v={video_id}&t={round(self.length - (kwargs['end'] - time.time()))}",
-                        }
-                    )
-                else:
-                    buttons.append(
-                        {"label": "Join", "url": f"https://youtube.com/watch?v={video_id}"}
-                    )
-            if self.presence != None:
-                try:
-                    self.presence.update(
-                        *args,
-                        **kwargs,
-                        large_image=large_image_url,
-                        buttons=buttons,
-                        large_text=channel_name,
-                        instance=False,
-                    )
-                except Exception:
+                    else:
+                        try:
+                            api_result = requests.get(
+                                "https://inflo-api.thefightagainstmalware.workers.dev/"
+                                + video_id,
+                                timeout=1
+                            ).json()
+                            large_image_url = api_result["maxres"]
+                            channel_name = api_result["channelTitle"]
+                        except Exception:
+                            large_image_url = (
+                                f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                            )
+                            channel_name = None
+                    if "end" in kwargs:
+                        buttons.append(
+                            {
+                                "label": "Join",
+                                "url": f"https://youtube.com/watch?v={video_id}&t={round(self.length - (kwargs['end'] - time.time()))}",
+                            }
+                        )
+                    else:
+                        buttons.append(
+                            {"label": "Join", "url": f"https://youtube.com/watch?v={video_id}"}
+                        )
                     try:
-                        self.presence.close()
+                        self.presence.update(
+                            *args,
+                            **kwargs,
+                            large_image=large_image_url,
+                            buttons=buttons,
+                            large_text=channel_name,
+                            instance=False,
+                            details=details + processed_name[0].strip(),
+                            state="".join(processed_name[1:]).strip()
+                        )
                     except Exception:
-                        pass
-                    self.presence = None
+                        try:
+                            self.presence.close()
+                        except Exception:
+                            pass
+                        self.presence = None
 
     def reload_presence(self, name, end):
         try:
@@ -166,8 +204,11 @@ class MusicPlayer:
         except Exception:
             pass
         self.presence = pypresence.Presence("1033827079994753064")
-        self.presence.connect()
-        self.update(state=name, end=end)
+        try:
+            self.presence.connect()
+            self.update(name=name, end=end)
+        except Exception:
+            pass
 
     def render_progress_bar(self, start: float, end: float) -> str:
         cur_time = time.time()
@@ -184,7 +225,7 @@ class MusicPlayer:
         start = time.time()
         end = time.time() + self.length
         self.playing = True
-        self.update(state=name, start=start, end=end)
+        self.update(name=name, start=start, end=end)
         count = 0
         mixer.music.load(song)
         mixer.music.play()
@@ -205,16 +246,15 @@ class MusicPlayer:
                     self.playing = False
                     if self.presence is not None:
                         self.update(
-                            state=name,
-                            details="Paused",
+                            name="Paused: " + name,
                             start=time.time(),
                         )
-                    self.unsetraw()
+                    IOUtilities.unsetraw(self.normal_tty_settings)
                     print(
-                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rPaused: {name}\n{self.render_progress_bar(start, end)}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
+                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rPaused: {name}\n{self.render_progress_bar(start, end)}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
                         end="",
                     )
-                    self.setraw()
+                    IOUtilities.setraw()
                 else:
                     if TYPE_CHECKING:
                         assert self.diff is not None
@@ -222,7 +262,7 @@ class MusicPlayer:
                     self.playing = True
                     end = time.time() + self.diff[1]
                     start = time.time() - self.diff[0]
-                    self.update(state=name, start=start, end=end)
+                    self.update(name=name, start=start, end=end)
             elif c == "u":
                 self.volume += 0.01
                 self.volume = min(1, self.volume)
@@ -236,28 +276,21 @@ class MusicPlayer:
                 start = time.time() - (mixer.music.get_pos() / 1000)
             # x1b for ESC
             if self.playing:
-                self.unsetraw()
-                if count % 100 == 0:
-                    self.update(state=name, start=start, end=end)
+                IOUtilities.unsetraw(self.normal_tty_settings)
+                if count % 1500 == 0:
+                    self.update(name=name, start=start, end=end)
                 to_print = f"Now playing {name}\n{self.render_progress_bar(start, end)}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
                 print(
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{to_print}\r",
                     end="",
                 )
-                self.lines_written = sum(map(lambda k: self.ceil(self.term_length(k) / os.get_terminal_size().columns), to_print.split("\n")))
-                self.setraw()
+                self.lines_written = sum(map(lambda k: self.ceil(IOUtilities.term_length(k) / os.get_terminal_size().columns), to_print.split("\n")))
+                IOUtilities.setraw()
             count += 1
             time.sleep(0.01)
         print(
-            f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}Now playing {name}\n{self.render_progress_bar(start, time.time())}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}",
+            f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}Now playing {name}\n{self.render_progress_bar(start, time.time())}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
         )
-
-    def term_length(self, string: str) -> int:
-        string = ANSI_REGEX.sub("", string)
-        length = 0
-        for char in string:
-            length += 2 if unicodedata.east_asian_width(char) in ["W", "F"] else 1
-        return length
 
     def get_length(self, music: str) -> float:
         try:
