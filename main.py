@@ -44,6 +44,8 @@ class IOUtilities:
         files = list(filter(lambda k: k.endswith("mp3"), os.listdir(".")))
         weights = {}
         for key in data:
+            if not isinstance(data[key], str):
+                continue
             if key in files:
                 weights[key] = data[key]
             else:
