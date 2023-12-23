@@ -31,6 +31,8 @@ except ImportError:
 YOUTUBE_DL_ID_REGEX = re.compile(r"\[[a-zA-Z0-9\-_]{11}]")
 MOVE_AND_CLEAR_LINE = "\x1b[1A\x1b[2K"
 ANSI_REGEX = re.compile("\x1b\\[\\d+?m")
+INFLO_SHARE_URL = "https://inflo-share-server.onrender.com/"
+
 
 class IOUtilities:
     @staticmethod
@@ -58,7 +60,7 @@ class IOUtilities:
             if file not in weights:
                 weights[file] = 1
         return zip(*weights.items())
-    
+
     @staticmethod
     def setraw():
         if UNIX_TTY:
@@ -71,7 +73,7 @@ class IOUtilities:
             termios.tcsetattr(
                 sys.stdin.fileno(), termios.TCSADRAIN, normal_tty_settings
             )
-    
+
     @staticmethod
     def term_length(string: str) -> int:
         string = ANSI_REGEX.sub("", string)
@@ -88,7 +90,7 @@ class IOUtilities:
         idx = 0
         while idx < len(name):
             while cur_len < 30 and idx < len(name):
-                cur += name[idx] # TODO: use graphemes instead
+                cur += name[idx]  # TODO: use graphemes instead
                 cur_len += IOUtilities.term_length(name[idx])
                 idx += 1
             lines.append(cur)
@@ -109,11 +111,19 @@ class MusicPlayer:
     initial: "str"
     lines_written: "int"
 
-    def __init__(self, presence: "pypresence.Presence | None", initial: "str", weights_file: "str", disable_api: "bool"):
+    def __init__(
+        self,
+        presence: "pypresence.Presence | None",
+        initial: "str",
+        weights_file: "str",
+        disable_api: "bool",
+        enable_share: "bool",
+    ):
         self.presence = presence
         self.disable_api = disable_api
         self.weights_file = weights_file
         self.initial = initial
+        self.enable_share = enable_share
 
     def start(self) -> None:
         self.presence_update_lock = threading.Lock()
@@ -126,6 +136,10 @@ class MusicPlayer:
         mixer.init()
         if self.presence != None:
             atexit.register(self.presence.close)
+        if self.enable_share:
+            share = requests.post(INFLO_SHARE_URL + "start").json()
+            self.secret: str = share["secret"]
+            self.share_id: str = share["id"]
         if self.initial is not None:
             self.play(self.initial)
         self.run()
@@ -162,26 +176,33 @@ class MusicPlayer:
                             api_result = requests.get(
                                 "https://inflo-api.thefightagainstmalware.workers.dev/"
                                 + video_id,
-                                timeout=1
+                                timeout=1,
                             ).json()
                             large_image_url = api_result["maxres"]
                             channel_name = api_result["channelTitle"]
                         except Exception:
-                            large_image_url = (
-                                f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-                            )
+                            large_image_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                             channel_name = None
-                    if "end" in kwargs:
-                        buttons.append(
-                            {
-                                "label": "Join",
-                                "url": f"https://youtube.com/watch?v={video_id}&t={round(self.length - (kwargs['end'] - time.time()))}",
-                            }
-                        )
+                    if not self.enable_share:
+                        if "end" in kwargs:
+                            buttons.append(
+                                {
+                                    "label": "Join",
+                                    "url": f"https://youtube.com/watch?v={video_id}&t={round(self.length - (kwargs['end'] - time.time()))}",
+                                }
+                            )
+                        else:
+                            buttons.append(
+                                {
+                                    "label": "Join",
+                                    "url": f"https://youtube.com/watch?v={video_id}",
+                                }
+                            )
                     else:
-                        buttons.append(
-                            {"label": "Join", "url": f"https://youtube.com/watch?v={video_id}"}
-                        )
+                        buttons.append({
+                            "label": "Join",
+                            "url": f"{INFLO_SHARE_URL}{self.share_id}"
+                        })
                     try:
                         self.presence.update(
                             *args,
@@ -191,7 +212,7 @@ class MusicPlayer:
                             large_text=channel_name,
                             instance=False,
                             details=details + processed_name[0].strip(),
-                            state="".join(processed_name[1:]).strip()
+                            state="".join(processed_name[1:]).strip(),
                         )
                     except Exception:
                         try:
@@ -221,6 +242,15 @@ class MusicPlayer:
         mins_end, secs_end = divmod(end - cur_time, 60)
         return f"{int(mins_start)}:{int(secs_start):02d} \x1b[32m{left_bar_width * '━'}\x1b[0m{right_bar_width * '━'} -{int(mins_end)}:{int(secs_end):02d}"
 
+    def update_share(self, youtube_id: str, progress: float, playing: bool):
+        if not self.enable_share:
+            return
+        requests.put(INFLO_SHARE_URL + "update/" + self.secret, json={
+            "playing": playing,
+            "id": youtube_id,
+            "progress": progress
+        })
+
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
         self.length = self.get_length(song)
@@ -228,6 +258,8 @@ class MusicPlayer:
         end = time.time() + self.length
         self.playing = True
         self.update(name=name, start=start, end=end)
+        youtube_id = YOUTUBE_DL_ID_REGEX.search(name).group(0).strip("[]")
+        threading.Thread(target=self.update_share, args=(youtube_id, 0, True)).start()
         count = 0
         mixer.music.load(song)
         mixer.music.play()
@@ -243,6 +275,7 @@ class MusicPlayer:
                     ).start()
             elif c == "p":
                 if self.playing:
+                    threading.Thread(target=self.update_share, args=(youtube_id, mixer.music.get_pos() / 1000, False)).start()
                     self.diff = (time.time() - start, end - time.time())
                     mixer.music.pause()
                     self.playing = False
@@ -261,6 +294,7 @@ class MusicPlayer:
                     if TYPE_CHECKING:
                         assert self.diff is not None
                     mixer.music.unpause()
+                    threading.Thread(target=self.update_share, args=(youtube_id, mixer.music.get_pos() / 1000, False)).start()
                     self.playing = True
                     end = time.time() + self.diff[1]
                     start = time.time() - self.diff[0]
@@ -286,7 +320,14 @@ class MusicPlayer:
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{to_print}\r",
                     end="",
                 )
-                self.lines_written = sum(map(lambda k: self.ceil(IOUtilities.term_length(k) / os.get_terminal_size().columns), to_print.split("\n")))
+                self.lines_written = sum(
+                    map(
+                        lambda k: self.ceil(
+                            IOUtilities.term_length(k) / os.get_terminal_size().columns
+                        ),
+                        to_print.split("\n"),
+                    )
+                )
                 IOUtilities.setraw()
             count += 1
             time.sleep(0.01)
@@ -329,9 +370,10 @@ class MusicPlayer:
             return c
         else:
             return ""
-    
+
     def ceil(self, val):
         return int(math.ceil(val) if val % 1 != 0 else val + 1)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -343,6 +385,8 @@ if __name__ == "__main__":
     parser.add_argument("--weights", required=False)
     parser.add_argument("--disable-discord", action="store_true")
     parser.add_argument("--disable-api", action="store_true")
+    parser.add_argument("--enable-share", action="store_true")
+
     args = parser.parse_args()
 
     pres = None
@@ -355,6 +399,10 @@ if __name__ == "__main__":
             pres = None
 
     player = MusicPlayer(
-        pres, args.first_song, weights_file=args.weights, disable_api=args.disable_api
+        pres,
+        args.first_song,
+        weights_file=args.weights,
+        disable_api=args.disable_api,
+        enable_share=args.enable_share,
     )
     player.start()
