@@ -1,4 +1,5 @@
 import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata
+from typing import TYPE_CHECKING, Any
 
 try:
     import tty, termios
@@ -13,7 +14,6 @@ except Exception:
     except ImportError:
         MSVCRT = False
 
-from typing import TYPE_CHECKING, Any
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
@@ -44,7 +44,7 @@ class IOUtilities:
         files = list(filter(lambda k: k.endswith("mp3"), os.listdir(".")))
         weights = {}
         for key in data:
-            if not isinstance(data[key], str):
+            if not isinstance(data[key], (int, float)):
                 continue
             if key in files:
                 weights[key] = data[key]
