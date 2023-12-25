@@ -1,5 +1,5 @@
 # Inflo
-My personal music player.
+My personal music player. Now with an internet radio™️.
 
 ## Running yourself
 You need python and pip (normally comes with python)
