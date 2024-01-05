@@ -134,7 +134,7 @@ class MusicPlayer:
             atexit.register(IOUtilities.unsetraw, self.normal_tty_settings)
         IOUtilities.setraw()
         mixer.init()
-        if self.presence != None:
+        if self.presence is not None:
             atexit.register(self.presence.close)
         if self.enable_share:
             share = requests.post(INFLO_SHARE_URL + "start").json()
@@ -150,7 +150,7 @@ class MusicPlayer:
             self.play(random.choices(keys, weights)[0])
 
     def update(self, *args, **kwargs):
-        if self.presence != None:
+        if self.presence is not None:
             with self.presence_update_lock:
                 buttons = [
                     {
@@ -214,7 +214,7 @@ class MusicPlayer:
                             details=details + processed_name[0].strip(),
                             state="".join(processed_name[1:]).strip(),
                         )
-                    except Exception:
+                    except Exception as e:
                         try:
                             self.presence.close()
                         except Exception:
@@ -233,7 +233,9 @@ class MusicPlayer:
         except Exception:
             pass
 
-    def render_progress_bar(self, start: float, end: float) -> str:
+    def render_progress_bar(self) -> str:
+        start = self.get_start()
+        end = self.get_end()
         cur_time = time.time()
         bar_width = os.get_terminal_size().columns - 14
         left_bar_width = int((cur_time - start) / (end - start) * bar_width)
@@ -251,15 +253,22 @@ class MusicPlayer:
             "progress": progress
         })
 
+    def get_start(self):
+        return time.time() - (mixer.music.get_pos() / 1000)
+    
+    def get_end(self):
+        return time.time() + self.length - (mixer.music.get_pos() / 1000)
+
+    def queue_thread(self, *args):
+        threading.Thread(target=args[0], args=args[1:]).start()
+
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
         self.length = self.get_length(song)
-        start = time.time()
-        end = time.time() + self.length
         self.playing = True
-        self.update(name=name, start=start, end=end)
+        self.update(name=name, start=time.time(), end=time.time() + self.length)
         youtube_id = YOUTUBE_DL_ID_REGEX.search(name).group(0).strip("[]")
-        threading.Thread(target=self.update_share, args=(youtube_id, 0, True)).start()
+        self.queue_thread(self.update_share, youtube_id, 0, True)
         count = 0
         mixer.music.load(song)
         mixer.music.play()
@@ -270,13 +279,10 @@ class MusicPlayer:
                 return
             elif c == "r":
                 with self.presence_update_lock:
-                    threading.Thread(
-                        target=self.reload_presence, args=(name, end)
-                    ).start()
+                    self.queue_thread(self.reload_presence, name, self.get_end())
             elif c == "p":
                 if self.playing:
-                    threading.Thread(target=self.update_share, args=(youtube_id, mixer.music.get_pos() / 1000, False)).start()
-                    self.diff = (time.time() - start, end - time.time())
+                    self.queue_thread(self.update_share, youtube_id, mixer.music.get_pos() / 1000, False)
                     mixer.music.pause()
                     self.playing = False
                     if self.presence is not None:
@@ -286,7 +292,7 @@ class MusicPlayer:
                         )
                     IOUtilities.unsetraw(self.normal_tty_settings)
                     print(
-                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rPaused: {name}\n{self.render_progress_bar(start, end)}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
+                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rPaused: {name}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
                         end="",
                     )
                     IOUtilities.setraw()
@@ -294,11 +300,9 @@ class MusicPlayer:
                     if TYPE_CHECKING:
                         assert self.diff is not None
                     mixer.music.unpause()
-                    threading.Thread(target=self.update_share, args=(youtube_id, mixer.music.get_pos() / 1000, False)).start()
+                    self.queue_thread(self.update_share,youtube_id, mixer.music.get_pos() / 1000, False)
                     self.playing = True
-                    end = time.time() + self.diff[1]
-                    start = time.time() - self.diff[0]
-                    self.update(name=name, start=start, end=end)
+                    self.update(name=name, start=self.get_start(), end=self.get_end())
             elif c == "u":
                 self.volume += 0.01
                 self.volume = min(1, self.volume)
@@ -307,15 +311,12 @@ class MusicPlayer:
                 self.volume -= 0.01
                 self.volume = max(0, self.volume)
                 mixer.music.set_volume(self.volume)
-            if count % 100 == 0:
-                end = (self.length - mixer.music.get_pos() / 1000) + time.time()
-                start = time.time() - (mixer.music.get_pos() / 1000)
             # x1b for ESC
             if self.playing:
                 IOUtilities.unsetraw(self.normal_tty_settings)
                 if count % 1500 == 0:
-                    self.update(name=name, start=start, end=end)
-                to_print = f"Now playing {name}\n{self.render_progress_bar(start, end)}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
+                    self.update(name=name, start=self.get_start(), end=self.get_end())
+                to_print = f"Now playing {name}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
                 print(
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{to_print}\r",
                     end="",
@@ -332,7 +333,7 @@ class MusicPlayer:
             count += 1
             time.sleep(0.01)
         print(
-            f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}Now playing {name}\n{self.render_progress_bar(start, time.time())}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
+            f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}Now playing {name}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
         )
 
     def get_length(self, music: str) -> float:
