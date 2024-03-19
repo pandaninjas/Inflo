@@ -1,8 +1,8 @@
-import argparse
+import argparse, sys
 from main import IOUtilities
 
 parser = argparse.ArgumentParser(
-    prog="Inflo Weights Generator",
+    prog=sys.argv[0],
     description="A program to show generated percentages from Inflo weights",
 )
 

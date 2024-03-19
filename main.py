@@ -1,4 +1,4 @@
-import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata
+import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata, contextlib
 from typing import TYPE_CHECKING, Any
 
 try:
@@ -19,9 +19,6 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
 
 requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
-
-print("\n\x1b[?25l")
-atexit.register(print, "\x1b[?25h", end="")
 
 try:
     from mutagen.mp3 import MP3
@@ -84,6 +81,14 @@ class IOUtilities:
 
     @staticmethod
     def process_name(name: str) -> "list[str]":
+        if IOUtilities.term_length(name) < 60:
+            cur_len, idx = 0, 0
+            cur = ""
+            while cur_len < IOUtilities.term_length(name) / 2:
+                cur += name[idx]
+                cur_len += IOUtilities.term_length(name[idx])
+                idx += 1
+            return [cur, name[idx:]]
         lines = []
         cur = ""
         cur_len = 0
@@ -97,6 +102,27 @@ class IOUtilities:
             cur = ""
             cur_len = 0
         return lines
+
+    @staticmethod
+    def normalize(text: str) -> str:
+        return (
+            text
+            if unicodedata.is_normalized("NFC", text)
+            else unicodedata.normalize("NFC", text)
+        )
+
+    @staticmethod
+    def getch():
+        if UNIX_TTY or MSVCRT:
+            if UNIX_TTY:
+                c = sys.stdin.read(1)
+            else:
+                c = msvcrt.getwch() if msvcrt.kbhit() else ""
+            if c == "\x03":
+                raise KeyboardInterrupt()
+            return c
+        else:
+            return ""
 
 
 class MusicPlayer:
@@ -150,8 +176,10 @@ class MusicPlayer:
             self.play(random.choices(keys, weights)[0])
 
     def update(self, *args, **kwargs):
-        if self.presence is not None:
-            with self.presence_update_lock:
+        with contextlib.redirect_stderr(None), contextlib.redirect_stderr(
+            None
+        ), self.presence_update_lock:
+            if self.presence is not None:
                 buttons = [
                     {
                         "label": "Source code",
@@ -199,10 +227,12 @@ class MusicPlayer:
                                 }
                             )
                     else:
-                        buttons.append({
-                            "label": "Join",
-                            "url": f"{INFLO_SHARE_URL}{self.share_id}"
-                        })
+                        buttons.append(
+                            {
+                                "label": "Join",
+                                "url": f"{INFLO_SHARE_URL}{self.share_id}",
+                            }
+                        )
                     try:
                         self.presence.update(
                             *args,
@@ -215,30 +245,33 @@ class MusicPlayer:
                             state="".join(processed_name[1:]).strip(),
                         )
                     except Exception as e:
+                        if isinstance(e, pypresence.PipeClosed):
+                            self.queue_thread(self.reload_presence)
+                            return
                         try:
                             self.presence.close()
                         except Exception:
                             pass
                         self.presence = None
 
-    def reload_presence(self, name, end):
-        try:
-            self.presence.close()
-        except Exception:
-            pass
-        self.presence = pypresence.Presence("1033827079994753064")
-        try:
-            self.presence.connect()
-            self.update(name=name, end=end)
-        except Exception:
-            pass
+    def reload_presence(self):
+        with contextlib.redirect_stderr(None), contextlib.redirect_stderr(None):
+            try:
+                self.presence.close()
+            except Exception:
+                pass
+            try:
+                self.presence = pypresence.Presence("1033827079994753064")
+                self.presence.connect()
+            except Exception:
+                pass
 
     def render_progress_bar(self) -> str:
         start = self.get_start()
         end = self.get_end()
         cur_time = time.time()
         bar_width = os.get_terminal_size().columns - 14
-        left_bar_width = int((cur_time - start) / (end - start) * bar_width)
+        left_bar_width = int(min((cur_time - start) / (end - start), 1) * bar_width)
         right_bar_width = bar_width - left_bar_width
         mins_start, secs_start = divmod(cur_time - start, 60)
         mins_end, secs_end = divmod(end - cur_time, 60)
@@ -247,15 +280,17 @@ class MusicPlayer:
     def update_share(self, youtube_id: str, progress: float, playing: bool):
         if not self.enable_share:
             return
-        requests.put(INFLO_SHARE_URL + "update/" + self.secret, json={
-            "playing": playing,
-            "id": youtube_id,
-            "progress": progress
-        })
+        try:
+            requests.put(
+                INFLO_SHARE_URL + "update/" + self.secret,
+                json={"playing": playing, "id": youtube_id, "progress": progress},
+            )
+        except Exception:
+            return
 
     def get_start(self):
         return time.time() - (mixer.music.get_pos() / 1000)
-    
+
     def get_end(self):
         return time.time() + self.length - (mixer.music.get_pos() / 1000)
 
@@ -273,16 +308,28 @@ class MusicPlayer:
         mixer.music.load(song)
         mixer.music.play()
         while mixer.music.get_busy() or not self.playing:
-            c = self.getch()
+            c = IOUtilities.getch()
             if c == "s":
                 print()
                 return
             elif c == "r":
                 with self.presence_update_lock:
-                    self.queue_thread(self.reload_presence, name, self.get_end())
+                    self.queue_thread(self.reload_presence)
+                if self.playing:
+                    self.update(name=name, start=self.get_start(), end=self.get_end())
+                else:
+                    self.update(
+                        name="Paused: " + name,
+                        start=time.time(),
+                    )
             elif c == "p":
                 if self.playing:
-                    self.queue_thread(self.update_share, youtube_id, mixer.music.get_pos() / 1000, False)
+                    self.queue_thread(
+                        self.update_share,
+                        youtube_id,
+                        mixer.music.get_pos() / 1000,
+                        False,
+                    )
                     mixer.music.pause()
                     self.playing = False
                     if self.presence is not None:
@@ -291,16 +338,31 @@ class MusicPlayer:
                             start=time.time(),
                         )
                     IOUtilities.unsetraw(self.normal_tty_settings)
+                    to_print = f"\rPaused: {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
                     print(
-                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}\rPaused: {name}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]lay, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
+                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{IOUtilities.normalize(to_print)}\r",
                         end="",
+                    )
+                    self.lines_written = sum(
+                        map(
+                            lambda k: self.ceil(
+                                IOUtilities.term_length(k)
+                                / os.get_terminal_size().columns
+                            ),
+                            to_print.split("\n"),
+                        )
                     )
                     IOUtilities.setraw()
                 else:
                     if TYPE_CHECKING:
                         assert self.diff is not None
                     mixer.music.unpause()
-                    self.queue_thread(self.update_share,youtube_id, mixer.music.get_pos() / 1000, False)
+                    self.queue_thread(
+                        self.update_share,
+                        youtube_id,
+                        mixer.music.get_pos() / 1000,
+                        False,
+                    )
                     self.playing = True
                     self.update(name=name, start=self.get_start(), end=self.get_end())
             elif c == "u":
@@ -316,11 +378,12 @@ class MusicPlayer:
                 IOUtilities.unsetraw(self.normal_tty_settings)
                 if count % 1500 == 0:
                     self.update(name=name, start=self.get_start(), end=self.get_end())
-                to_print = f"Now playing {name}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
+                to_print = f"Now playing {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
                 print(
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{to_print}\r",
                     end="",
                 )
+                # TODO: revamp lines_written system so that it uses the terminal size *before* printing rather than the terminal size after.
                 self.lines_written = sum(
                     map(
                         lambda k: self.ceil(
@@ -332,9 +395,7 @@ class MusicPlayer:
                 IOUtilities.setraw()
             count += 1
             time.sleep(0.01)
-        print(
-            f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}Now playing {name}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n",
-        )
+        print()
 
     def get_length(self, music: str) -> float:
         try:
@@ -359,18 +420,6 @@ class MusicPlayer:
             except Exception:
                 print("warning: ffmpeg failed. setting length to 0")
                 return 0
-
-    def getch(self):
-        if UNIX_TTY or MSVCRT:
-            if UNIX_TTY:
-                c = sys.stdin.read(1)
-            else:
-                c = msvcrt.getwch() if msvcrt.kbhit() else ""
-            if c == "\x03":
-                raise KeyboardInterrupt()
-            return c
-        else:
-            return ""
 
     def ceil(self, val):
         return int(math.ceil(val) if val % 1 != 0 else val + 1)
@@ -399,6 +448,9 @@ if __name__ == "__main__":
             print("No pres: " + str(e))
             pres = None
 
+    print("\n\x1b[?25l")
+    atexit.register(print, "\x1b[?25h", end="")
+
     player = MusicPlayer(
         pres,
         args.first_song,
@@ -406,4 +458,7 @@ if __name__ == "__main__":
         disable_api=args.disable_api,
         enable_share=args.enable_share,
     )
-    player.start()
+    try:
+        player.start()
+    except KeyboardInterrupt:
+        sys.exit(0)
