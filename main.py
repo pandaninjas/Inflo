@@ -354,14 +354,12 @@ class MusicPlayer:
                     )
                     IOUtilities.setraw()
                 else:
-                    if TYPE_CHECKING:
-                        assert self.diff is not None
                     mixer.music.unpause()
                     self.queue_thread(
                         self.update_share,
                         youtube_id,
                         mixer.music.get_pos() / 1000,
-                        False,
+                        True,
                     )
                     self.playing = True
                     self.update(name=name, start=self.get_start(), end=self.get_end())
