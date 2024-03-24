@@ -124,6 +124,31 @@ class IOUtilities:
         else:
             return ""
 
+    @staticmethod
+    def get_length(music: str) -> float:
+        try:
+            return MP3(music).info.length
+        except Exception:
+            try:
+                return float(
+                    subprocess.check_output(
+                        [
+                            "ffprobe",
+                            "-i",
+                            music,
+                            "-show_entries",
+                            "format=duration",
+                            "-v",
+                            "quiet",
+                            "-of",
+                            'csv="p=0"',
+                        ]
+                    )
+                )
+            except Exception:
+                print("warning: ffmpeg failed. setting length to 0")
+                return 0
+
 
 class MusicPlayer:
     presence: "pypresence.Presence | None"
@@ -135,7 +160,7 @@ class MusicPlayer:
     length: "float"
     volume: "float"
     initial: "str"
-    lines_written: "int"
+    lines_written: "list[str] | None"
 
     def __init__(
         self,
@@ -152,9 +177,9 @@ class MusicPlayer:
         self.enable_share = enable_share
 
     def start(self) -> None:
+        self.lines_written = None
         self.presence_update_lock = threading.Lock()
         self.volume = 1.0
-        self.lines_written = 3
         if UNIX_TTY:
             self.normal_tty_settings = termios.tcgetattr(sys.stdin.fileno())
             atexit.register(IOUtilities.unsetraw, self.normal_tty_settings)
@@ -299,7 +324,7 @@ class MusicPlayer:
 
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
-        self.length = self.get_length(song)
+        self.length = IOUtilities.get_length(song)
         self.playing = True
         self.update(name=name, start=time.time(), end=time.time() + self.length)
         youtube_id = YOUTUBE_DL_ID_REGEX.search(name).group(0).strip("[]")
@@ -343,15 +368,7 @@ class MusicPlayer:
                         f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{IOUtilities.normalize(to_print)}\r",
                         end="",
                     )
-                    self.lines_written = sum(
-                        map(
-                            lambda k: self.ceil(
-                                IOUtilities.term_length(k)
-                                / os.get_terminal_size().columns
-                            ),
-                            to_print.split("\n"),
-                        )
-                    )
+                    self.lines_written = to_print.split("\n")
                     IOUtilities.setraw()
                 else:
                     mixer.music.unpause()
@@ -378,46 +395,26 @@ class MusicPlayer:
                     self.update(name=name, start=self.get_start(), end=self.get_end())
                 to_print = f"Now playing {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
                 print(
-                    f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{to_print}\r",
+                    f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.calculate_lines_written() - 1)}{to_print}\r",
                     end="",
                 )
-                # TODO: revamp lines_written system so that it uses the terminal size *before* printing rather than the terminal size after.
-                self.lines_written = sum(
-                    map(
-                        lambda k: self.ceil(
-                            IOUtilities.term_length(k) / os.get_terminal_size().columns
-                        ),
-                        to_print.split("\n"),
-                    )
-                )
+                self.lines_written = to_print.split("\n")
                 IOUtilities.setraw()
             count += 1
             time.sleep(0.01)
         print()
 
-    def get_length(self, music: str) -> float:
-        try:
-            return MP3(music).info.length
-        except Exception:
-            try:
-                return float(
-                    subprocess.check_output(
-                        [
-                            "ffprobe",
-                            "-i",
-                            music,
-                            "-show_entries",
-                            "format=duration",
-                            "-v",
-                            "quiet",
-                            "-of",
-                            'csv="p=0"',
-                        ]
-                    )
-                )
-            except Exception:
-                print("warning: ffmpeg failed. setting length to 0")
-                return 0
+    def calculate_lines_written(self):
+        if self.lines_written == None:
+            return 4
+        return sum(
+            map(
+                lambda k: self.ceil(
+                    IOUtilities.term_length(k) / os.get_terminal_size().columns
+                ),
+                self.lines_written,
+            )
+        )
 
     def ceil(self, val):
         return int(math.ceil(val) if val % 1 != 0 else val + 1)
