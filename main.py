@@ -365,7 +365,7 @@ class MusicPlayer:
                     IOUtilities.unsetraw(self.normal_tty_settings)
                     to_print = f"\rPaused: {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
                     print(
-                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.lines_written - 1)}{IOUtilities.normalize(to_print)}\r",
+                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.calculate_lines_written() - 1)}{IOUtilities.normalize(to_print)}\r",
                         end="",
                     )
                     self.lines_written = to_print.split("\n")
