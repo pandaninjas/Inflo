@@ -18,8 +18,6 @@ except Exception:
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 from pygame import mixer
 
-requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
-
 try:
     from mutagen.mp3 import MP3
 except ImportError:
@@ -177,6 +175,7 @@ class MusicPlayer:
         self.enable_share = enable_share
 
     def start(self) -> None:
+        requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
         self.lines_written = None
         self.presence_update_lock = threading.Lock()
         self.volume = 1.0
@@ -306,10 +305,14 @@ class MusicPlayer:
         if not self.enable_share:
             return
         try:
-            requests.put(
+            r = requests.put(
                 INFLO_SHARE_URL + "update/" + self.secret,
                 json={"playing": playing, "id": youtube_id, "progress": progress},
-            )
+            ).json()
+            if r["status"] == "fail":
+                share = requests.post(INFLO_SHARE_URL + "start").json()
+                self.secret: str = share["secret"]
+                self.share_id: str = share["id"]
         except Exception:
             return
 
@@ -406,7 +409,7 @@ class MusicPlayer:
 
     def calculate_lines_written(self):
         if self.lines_written == None:
-            return 4
+            return 3
         return sum(
             map(
                 lambda k: self.ceil(
