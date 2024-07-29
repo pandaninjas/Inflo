@@ -1,3 +1,4 @@
+import functools
 import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata, contextlib
 from typing import TYPE_CHECKING, Any
 
@@ -71,18 +72,20 @@ class IOUtilities:
 
     @staticmethod
     def term_length(string: str) -> int:
-        string = ANSI_REGEX.sub("", string)
+        string = ANSI_REGEX.sub("", string).replace("\n", "")
         length = 0
         for char in string:
             length += 2 if unicodedata.east_asian_width(char) in ["W", "F"] else 1
         return length
 
     @staticmethod
+    @functools.cache
     def process_name(name: str) -> "list[str]":
-        if IOUtilities.term_length(name) < 60:
+        length = IOUtilities.term_length(name)
+        if length < 60:
             cur_len, idx = 0, 0
             cur = ""
-            while cur_len < IOUtilities.term_length(name) / 2:
+            while cur_len < length / 2:
                 cur += name[idx]
                 cur_len += IOUtilities.term_length(name[idx])
                 idx += 1
@@ -102,12 +105,9 @@ class IOUtilities:
         return lines
 
     @staticmethod
+    @functools.cache
     def normalize(text: str) -> str:
-        return (
-            text
-            if unicodedata.is_normalized("NFC", text)
-            else unicodedata.normalize("NFC", text)
-        )
+        return unicodedata.normalize("NFC", text)
 
     @staticmethod
     def getch():
@@ -294,12 +294,14 @@ class MusicPlayer:
         start = self.get_start()
         end = self.get_end()
         cur_time = time.time()
-        bar_width = os.get_terminal_size().columns - 14
-        left_bar_width = int(min((cur_time - start) / (end - start), 1) * bar_width)
-        right_bar_width = bar_width - left_bar_width
         mins_start, secs_start = divmod(cur_time - start, 60)
         mins_end, secs_end = divmod(end - cur_time, 60)
-        return f"{int(mins_start)}:{int(secs_start):02d} \x1b[32m{left_bar_width * '━'}\x1b[0m{right_bar_width * '━'} -{int(mins_end)}:{int(secs_end):02d}"
+        left_timer = f"{int(mins_start)}:{int(secs_start):02d} "
+        right_timer = f" -{int(mins_end)}:{int(secs_end):02d}"
+        bar_width = os.get_terminal_size().columns - len(left_timer) - len(right_timer)
+        left_bar_width = int(min((cur_time - start) / (end - start), 1) * bar_width)
+        right_bar_width = bar_width - left_bar_width
+        return f"{left_timer}\x1b[32m{left_bar_width * '━'}\x1b[0m{right_bar_width * '━'}{right_timer}"
 
     def update_share(self, youtube_id: str, progress: float, playing: bool):
         if not self.enable_share:
@@ -365,14 +367,6 @@ class MusicPlayer:
                             name="Paused: " + name,
                             start=time.time(),
                         )
-                    IOUtilities.unsetraw(self.normal_tty_settings)
-                    to_print = f"\rPaused: {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
-                    print(
-                        f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.calculate_lines_written() - 1)}{IOUtilities.normalize(to_print)}\r",
-                        end="",
-                    )
-                    self.lines_written = to_print.split("\n")
-                    IOUtilities.setraw()
                 else:
                     mixer.music.unpause()
                     self.queue_thread(
@@ -396,9 +390,18 @@ class MusicPlayer:
                 IOUtilities.unsetraw(self.normal_tty_settings)
                 if count % 1500 == 0:
                     self.update(name=name, start=self.get_start(), end=self.get_end())
-                to_print = f"Now playing {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}\n\n\n\n\n\n"
+                to_print = f"Now playing {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}"
                 print(
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.calculate_lines_written() - 1)}{to_print}\r",
+                    end="",
+                )
+                self.lines_written = to_print.split("\n")
+                IOUtilities.setraw()
+            else:
+                IOUtilities.unsetraw(self.normal_tty_settings)
+                to_print = f"\rPaused: {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}"
+                print(
+                    f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.calculate_lines_written() - 1)}{IOUtilities.normalize(to_print)}\r",
                     end="",
                 )
                 self.lines_written = to_print.split("\n")
@@ -407,7 +410,7 @@ class MusicPlayer:
             time.sleep(0.01)
         print()
 
-    def calculate_lines_written(self):
+    def calculate_lines_written(self) -> int:
         if self.lines_written == None:
             return 3
         return sum(
@@ -419,8 +422,8 @@ class MusicPlayer:
             )
         )
 
-    def ceil(self, val):
-        return int(math.ceil(val) if val % 1 != 0 else val + 1)
+    def ceil(self, val: int):
+        return math.ceil(val) if val > 0 else 1
 
 
 if __name__ == "__main__":
