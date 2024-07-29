@@ -162,3 +162,4 @@ cython_debug/
 # weirdness involving my python installation
 Lib/
 Scripts/
+.vscode
