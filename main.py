@@ -1,5 +1,5 @@
 import functools
-import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata, contextlib
+import os, time, pypresence, random, sys, subprocess, threading, json, argparse, atexit, re, requests, requests_cache, math, unicodedata, contextlib, bisect
 from typing import TYPE_CHECKING, Any
 
 try:
@@ -157,13 +157,13 @@ class MusicPlayer:
     weights_file: "str"
     length: "float"
     volume: "float"
-    initial: "str"
+    queue: "list[str]"
     lines_written: "list[str] | None"
 
     def __init__(
         self,
         presence: "pypresence.Presence | None",
-        initial: "str",
+        initial: "str | None",
         weights_file: "str",
         disable_api: "bool",
         enable_share: "bool",
@@ -171,11 +171,14 @@ class MusicPlayer:
         self.presence = presence
         self.disable_api = disable_api
         self.weights_file = weights_file
-        self.initial = initial
+        self.queue = [initial] if initial is not None else []
         self.enable_share = enable_share
 
     def start(self) -> None:
         requests_cache.install_cache("inflo_cache", backend="memory", expire_after=3600)
+        self.queue_content = ""
+        self.auto = ""
+        self.is_queueing = False
         self.lines_written = None
         self.presence_update_lock = threading.Lock()
         self.volume = 1.0
@@ -190,14 +193,16 @@ class MusicPlayer:
             share = requests.post(INFLO_SHARE_URL + "start").json()
             self.secret: str = share["secret"]
             self.share_id: str = share["id"]
-        if self.initial is not None:
-            self.play(self.initial)
         self.run()
 
     def run(self):
         while True:
-            keys, weights = IOUtilities.generate_weights(self.weights_file)
-            self.play(random.choices(keys, weights)[0])
+            if len(self.queue) != 0:
+                self.play(self.queue[0])
+                self.queue.pop(0)
+            else:
+                keys, weights = IOUtilities.generate_weights(self.weights_file)
+                self.play(random.choices(keys, weights)[0])
 
     def update(self, *args, **kwargs):
         with contextlib.redirect_stderr(None), contextlib.redirect_stderr(
@@ -327,6 +332,26 @@ class MusicPlayer:
     def queue_thread(self, *args):
         threading.Thread(target=args[0], args=args[1:]).start()
 
+    def autocomplete(self):
+        if self.auto != "":
+            # get next autocomplete
+            files = sorted(
+                filter(
+                    lambda file: file.startswith(self.auto) and file.endswith(".mp3"),
+                    os.listdir("."),
+                )
+            )
+            idx = bisect.bisect(files, self.queue_content) % len(files)
+            self.queue_content = files[idx]
+        else:
+            self.auto = self.queue_content
+            self.queue_content = sorted(
+                filter(
+                    lambda file: file.startswith(self.auto) and file.endswith(".mp3"),
+                    os.listdir("."),
+                )
+            )[0]
+
     def play(self, song: str) -> None:
         name = song.replace(".mp3", "").strip()
         self.length = IOUtilities.get_length(song)
@@ -339,58 +364,96 @@ class MusicPlayer:
         mixer.music.play()
         while mixer.music.get_busy() or not self.playing:
             c = IOUtilities.getch()
-            if c == "s":
-                print()
-                return
-            elif c == "r":
-                with self.presence_update_lock:
-                    self.queue_thread(self.reload_presence)
-                if self.playing:
-                    self.update(name=name, start=self.get_start(), end=self.get_end())
+            if self.is_queueing:
+                if c == "\x1b":  # escape key
+                    self.is_queueing = False
+                    self.queue_content = ""
+                    self.auto = ""
+                elif c == "\x08":  # backspace
+                    self.queue_content = self.queue_content[:-1]
+                    self.auto = ""
+                elif c == "\t":  # tab
+                    self.autocomplete()
+                elif c == "\r":
+                    self.queue.append(
+                        next(
+                            filter(
+                                lambda file: file.startswith(self.queue_content)
+                                and file.endswith(".mp3"),
+                                os.listdir("."),
+                            )
+                        )
+                    )
+                    self.auto = ""
+                    self.is_queueing = False
+                    self.queue_content = ""
                 else:
-                    self.update(
-                        name="Paused: " + name,
-                        start=time.time(),
-                    )
-            elif c == "p":
-                if self.playing:
-                    self.queue_thread(
-                        self.update_share,
-                        youtube_id,
-                        mixer.music.get_pos() / 1000,
-                        False,
-                    )
-                    mixer.music.pause()
-                    self.playing = False
-                    if self.presence is not None:
+                    self.queue_content += c
+                    self.auto = ""
+            else:
+                if c == "s":
+                    print()
+                    return
+                elif c == "r":
+                    with self.presence_update_lock:
+                        self.queue_thread(self.reload_presence)
+                    if self.playing:
+                        self.update(
+                            name=name, start=self.get_start(), end=self.get_end()
+                        )
+                    else:
                         self.update(
                             name="Paused: " + name,
                             start=time.time(),
                         )
-                else:
-                    mixer.music.unpause()
-                    self.queue_thread(
-                        self.update_share,
-                        youtube_id,
-                        mixer.music.get_pos() / 1000,
-                        True,
-                    )
-                    self.playing = True
-                    self.update(name=name, start=self.get_start(), end=self.get_end())
-            elif c == "u":
-                self.volume += 0.01
-                self.volume = min(1, self.volume)
-                mixer.music.set_volume(self.volume)
-            elif c == "d":
-                self.volume -= 0.01
-                self.volume = max(0, self.volume)
-                mixer.music.set_volume(self.volume)
-            # x1b for ESC
+                elif c == "p":
+                    if self.playing:
+                        self.queue_thread(
+                            self.update_share,
+                            youtube_id,
+                            mixer.music.get_pos() / 1000,
+                            False,
+                        )
+                        mixer.music.pause()
+                        self.playing = False
+                        if self.presence is not None:
+                            self.update(
+                                name="Paused: " + name,
+                                start=time.time(),
+                            )
+                    else:
+                        mixer.music.unpause()
+                        self.queue_thread(
+                            self.update_share,
+                            youtube_id,
+                            mixer.music.get_pos() / 1000,
+                            True,
+                        )
+                        self.playing = True
+                        self.update(
+                            name=name, start=self.get_start(), end=self.get_end()
+                        )
+                elif c == "u":
+                    self.volume += 0.01
+                    self.volume = min(1, self.volume)
+                    mixer.music.set_volume(self.volume)
+                elif c == "d":
+                    self.volume -= 0.01
+                    self.volume = max(0, self.volume)
+                    mixer.music.set_volume(self.volume)
+                elif c == "q":
+                    self.is_queueing = True
+                # x1b for ESC
+            controls = (
+                "controls: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own, [q]ueue mode"
+                if not self.is_queueing
+                else "enter to submit, tab to autocomplete, esc to leave"
+            )
             if self.playing:
                 IOUtilities.unsetraw(self.normal_tty_settings)
                 if count % 1500 == 0:
                     self.update(name=name, start=self.get_start(), end=self.get_end())
-                to_print = f"Now playing {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}"
+                to_print = f"Now playing {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\n{controls}\nvolume: {self.volume:.2f}\n{self.queue_content}"
                 print(
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.calculate_lines_written() - 1)}{to_print}\r",
                     end="",
@@ -399,7 +462,7 @@ class MusicPlayer:
                 IOUtilities.setraw()
             else:
                 IOUtilities.unsetraw(self.normal_tty_settings)
-                to_print = f"\rPaused: {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\ncontrols: [s]kip, [r]eload presence, [p]ause, volume [u]p, volume [d]own\nvolume: {self.volume:.2f}"
+                to_print = f"\rPaused: {IOUtilities.normalize(name)}\n{self.render_progress_bar()}\n{controls}\nvolume: {self.volume:.2f}\n{self.queue_content}"
                 print(
                     f"\x1b[2K\r{MOVE_AND_CLEAR_LINE * (self.calculate_lines_written() - 1)}{IOUtilities.normalize(to_print)}\r",
                     end="",
