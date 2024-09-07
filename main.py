@@ -346,7 +346,7 @@ class MusicPlayer:
             return
         if self.auto != "":
             # get next autocomplete
-            idx = bisect.bisect(files, self.queue_content) % len(files)
+            idx = bisect.bisect(files, self.auto) % len(files)
             self.queue_content = files[idx]
         else:
             self.queue_content = files[0]
