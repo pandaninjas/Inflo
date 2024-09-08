@@ -159,6 +159,9 @@ class MusicPlayer:
     volume: "float"
     queue: "list[str]"
     lines_written: "list[str] | None"
+    queue_content: "str"
+    auto: "str"
+    is_queueing: "bool"
 
     def __init__(
         self,
@@ -333,22 +336,21 @@ class MusicPlayer:
         threading.Thread(target=args[0], args=args[1:]).start()
 
     def autocomplete(self):
-        if not self.auto:
-            self.auto = self.queue_content
-
         files = sorted(
             filter(
-                lambda file: file.startswith(self.auto) and file.endswith(".mp3"),
+                lambda file: file.startswith(self.auto if self.auto != "" else self.queue_content) and file.endswith(".mp3"),
                 os.listdir("."),
             )
         )
+
         if len(files) == 0:
             return
         if self.auto != "":
             # get next autocomplete
-            idx = bisect.bisect(files, self.auto) % len(files)
+            idx = bisect.bisect(files, self.queue_content) % len(files)
             self.queue_content = files[idx]
         else:
+            self.auto = self.queue_content
             self.queue_content = files[0]
 
     def play(self, song: str) -> None:
@@ -386,7 +388,7 @@ class MusicPlayer:
                     self.auto = ""
                     self.is_queueing = False
                     self.queue_content = ""
-                else:
+                elif c != "":
                     self.queue_content += c
                     self.auto = ""
             else:
