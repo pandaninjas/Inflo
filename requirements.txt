@@ -1,4 +1,4 @@
-mutagen==1.47.0
+mutagen==1.48.1
 pygame==2.6.0
 pypresence @ git+https://github.com/pandaninjas/pypresence@master
 requests
